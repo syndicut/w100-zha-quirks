@@ -545,6 +545,22 @@ class W100ManuSpecificCluster(XiaomiAqaraE1Cluster):
         _LOGGER.debug("W100 payload: %s", payload_ascii)
         self._process_payload_updates(payload_ascii)
 
+        # A PMTSD frame sent by the W100 itself (byte 3 == 0x84, e.g. after a
+        # setpoint change with the buttons) must be acknowledged, as an Aqara hub
+        # does. Without a reply the W100 shows E02 after ~10 s. Our own writes
+        # (byte 3 == 0x44) also pass through here and must not be answered.
+        if payload_ascii and len(data) >= 4 and data[3] == 0x84:
+            _LOGGER.debug("W100: acknowledging device PMTSD by echoing the state")
+            asyncio.create_task(self._ack_device_pmtsd())
+
+    async def _ack_device_pmtsd(self):
+        """Echo the current PMTSD state back to the W100 (clears/prevents E02)."""
+        await asyncio.sleep(1)
+        try:
+            await self._send_cached_pmtsd()
+        except Exception as e:  # noqa: BLE001 - radio errors must not break parsing
+            _LOGGER.warning("W100: failed to acknowledge PMTSD: %s", e)
+
     def _process_payload_updates(self, payload_ascii):
         """Process the parsed ASCII payload."""
         # Parse P_M_T_S_D format
